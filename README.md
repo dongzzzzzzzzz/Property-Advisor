@@ -17,11 +17,12 @@ B 端发布链路：
 
 1. 识别用户是找房还是发布房源
 2. 判断出租 / 出售
-3. 抽取发布字段与房源强项
-4. 信息不足时返回追问，不调用发布命令
-5. 第一阶段调用 `ok-core-skill publish-property`
-6. 默认只 dry-run 或填表，不自动提交
-7. 用户确认后才允许带 `--submit` 真实发布
+3. 自动路由发布市场：英国/Gumtree 走 `gt-core-skill publish-listing`，其他市场默认走 `ok-core-skill publish-property`
+4. 抽取发布字段与房源强项，中文平方米会换算为 OK 表单使用的 sqft
+5. 有位置、地址或 postcode 时调用 bundled `public-osm-map-context-skill`
+6. 信息不足时返回分级 readiness 和深入追问，不调用发布命令
+7. 默认只 dry-run 或填表，不自动提交
+8. 用户确认后才允许真实发布；GT 真实发布还需要 Gumtree `publish_endpoint`
 
 ## 当前能力
 
@@ -49,10 +50,11 @@ B 端发布链路：
 - 缺少原帖链接的房源 fail-closed，不会被点名展示
 - B 端发布支持：
   - `business_publish` 意图识别
+  - 发布 readiness 分级与上下文追问
   - 发布字段完整度检查
-  - 房源标题/描述与强项生成
+  - 基于用户字段与地图 assessments 的证据化标题/描述生成
   - OK `publish-property` dry-run / 填表 / 确认发布
-  - GT `publish-listing` payload 与 dry-run 预置
+  - GT `publish-listing` dry-run / 确认发布 endpoint 透传
 
 ## 项目结构
 
@@ -189,6 +191,7 @@ python3 scripts/cli.py publish \
 ```
 
 真实发布必须显式追加 `--confirm-submit`。没有图片时可以生成草稿或填表，但确认发布前会要求补至少一张本地绝对路径图片。
+英国发布会自动路由到 GT；`--confirm-submit` 时会调用 `publish-listing`，如果 Gumtree session 未配置 `publish_endpoint`，需额外传 `--publish-endpoint`。
 
 ## 输出说明
 
@@ -224,3 +227,4 @@ python3 -B -m unittest discover -s public-osm-map-context-skill/tests
 - 缺原帖链接 fail-closed
 - 最终 8 列候选表 golden test
 - B 端发布意图识别、缺字段追问、OK 发布参数安全策略、GT dry-run payload
+- B 端发布地图增强、证据化文案、中文面积换算、UK 自动 GT 发布路由

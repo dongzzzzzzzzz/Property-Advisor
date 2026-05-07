@@ -86,9 +86,13 @@ class PublishPropertyRequest:
     contact_email: str | None = None
     category_id: str | None = None
     postcode: str | None = None
+    address: str | None = None
+    publish_endpoint: str | None = None
+    original_area_size: str | None = None
+    area_unit: str | None = None
     lang: str = "en"
     query_text: str = ""
-    market_hint: str = "ok"
+    market_hint: str = "auto"
     resolved_market: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -105,11 +109,19 @@ class PublishPropertyReport:
     selected_runtime_mode: str | None = None
     generated_title: str = ""
     generated_description: str = ""
+    readiness_status: str = ""
     missing_fields: list[str] = field(default_factory=list)
+    required_missing_fields: list[str] = field(default_factory=list)
     recommended_missing_fields: list[str] = field(default_factory=list)
     follow_up_questions: list[str] = field(default_factory=list)
+    contextual_follow_up_questions: list[str] = field(default_factory=list)
     command: list[str] = field(default_factory=list)
     publish_result: dict[str, Any] | None = None
+    map_report: dict[str, Any] | None = None
+    map_assessments: dict[str, Any] = field(default_factory=dict)
+    map_verification_links: dict[str, str] = field(default_factory=dict)
+    publish_facts: dict[str, Any] = field(default_factory=dict)
+    area_conversion_warnings: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -123,11 +135,19 @@ class PublishPropertyReport:
             "selected_runtime_mode": self.selected_runtime_mode,
             "generated_title": self.generated_title,
             "generated_description": self.generated_description,
+            "readiness_status": self.readiness_status,
             "missing_fields": list(self.missing_fields),
+            "required_missing_fields": list(self.required_missing_fields),
             "recommended_missing_fields": list(self.recommended_missing_fields),
             "follow_up_questions": list(self.follow_up_questions),
+            "contextual_follow_up_questions": list(self.contextual_follow_up_questions),
             "command": list(self.command),
             "publish_result": self.publish_result,
+            "map_report": self.map_report,
+            "map_assessments": dict(self.map_assessments),
+            "map_verification_links": dict(self.map_verification_links),
+            "publish_facts": dict(self.publish_facts),
+            "area_conversion_warnings": list(self.area_conversion_warnings),
             "warnings": list(self.warnings),
             "errors": list(self.errors),
         }

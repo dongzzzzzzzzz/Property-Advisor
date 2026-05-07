@@ -576,16 +576,15 @@ class GTPublishSkillClient:
         save_draft: bool = False,
         dry_run: bool = True,
     ) -> dict[str, Any]:
-        if submit:
-            return {
-                "ok": False,
-                "error": "GT real publishing is not enabled in property-advisor yet; use dry-run payload review first.",
-            }
         payload = gt_publish_payload(request)
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             payload_file = handle.name
-        args = ["publish-listing", "--payload-file", payload_file, "--dry-run"]
+        args = ["publish-listing", "--payload-file", payload_file]
+        if request.publish_endpoint:
+            args.extend(["--endpoint", request.publish_endpoint])
+        if not submit:
+            args.append("--dry-run")
         return self._run_json(args, timeout=120)
 
     def _select_runtime(self) -> tuple[list[str], str, PreflightCheck]:

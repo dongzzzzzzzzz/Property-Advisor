@@ -9,6 +9,7 @@ from pathlib import Path
 
 from property_advisor.gt_client import (
     GTCoreSkillClient,
+    GTCoreSkillError,
     GTPublishSkillClient,
     canonicalize_gumtree_url,
     extract_gumtree_listing_id,
@@ -246,6 +247,105 @@ class GTCoreSkillClientTests(unittest.TestCase):
         self.assertTrue(result["dry_run"])
         self.assertIn("--dry-run", client.last_command)
         self.assertIn("publish-listing", client.last_command)
+
+    def test_publish_client_submit_uses_real_publish_with_endpoint(self) -> None:
+        publish_response = {
+            "ok": True,
+            "status": 201,
+            "message": "发布成功",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir()
+            (root / "scripts" / "cli.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+            def runner(command, **kwargs):
+                cwd = kwargs.get("cwd")
+                if cwd != str(root):
+                    return completed(returncode=1, stderr="unexpected cwd")
+                if command == [sys.executable, "-B", "scripts/cli.py", "--help"]:
+                    return completed(stdout=API_HELP)
+                if command == ["python3", "scripts/cli.py", "publish-listing", "--help"]:
+                    return completed(stdout="usage: publish-listing --payload-file FILE [--endpoint ENDPOINT] [--dry-run]")
+                if command[:3] == ["python3", "scripts/cli.py", "publish-listing"]:
+                    return completed(stdout=json.dumps(publish_response))
+                return completed(returncode=1, stderr=f"unexpected command: {command}")
+
+            client = GTPublishSkillClient(
+                skill_root=root,
+                runner=runner,
+                which=lambda command: "/usr/bin/python3" if command == "python3" else None,
+                env={},
+            )
+            result = client.publish_property(
+                PublishPropertyRequest(
+                    mode="rent",
+                    property_type="apartment",
+                    title="Furnished 1BR in Richmond",
+                    description="Near station.",
+                    location="Richmond",
+                    postcode="TW9 1EJ",
+                    price="1200",
+                    phone="07123456789",
+                    category_id="12345",
+                    rent_period="month",
+                    publish_endpoint="https://example.test/publish",
+                ),
+                submit=True,
+                dry_run=False,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("--dry-run", client.last_command)
+        self.assertIn("--endpoint", client.last_command)
+        self.assertIn("https://example.test/publish", client.last_command)
+
+    def test_publish_client_submit_without_endpoint_surfaces_gt_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "scripts").mkdir()
+            (root / "scripts" / "cli.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+            def runner(command, **kwargs):
+                cwd = kwargs.get("cwd")
+                if cwd != str(root):
+                    return completed(returncode=1, stderr="unexpected cwd")
+                if command == [sys.executable, "-B", "scripts/cli.py", "--help"]:
+                    return completed(stdout=API_HELP)
+                if command == ["python3", "scripts/cli.py", "publish-listing", "--help"]:
+                    return completed(stdout="usage: publish-listing --payload-file FILE [--endpoint ENDPOINT] [--dry-run]")
+                if command[:3] == ["python3", "scripts/cli.py", "publish-listing"]:
+                    return completed(
+                        returncode=2,
+                        stdout=json.dumps({"ok": False, "error": "未配置 publish endpoint"}),
+                    )
+                return completed(returncode=1, stderr=f"unexpected command: {command}")
+
+            client = GTPublishSkillClient(
+                skill_root=root,
+                runner=runner,
+                which=lambda command: "/usr/bin/python3" if command == "python3" else None,
+                env={},
+            )
+
+            with self.assertRaisesRegex(GTCoreSkillError, "publish endpoint"):
+                client.publish_property(
+                    PublishPropertyRequest(
+                        mode="rent",
+                        property_type="apartment",
+                        title="Furnished 1BR in Richmond",
+                        description="Near station.",
+                        location="Richmond",
+                        postcode="TW9 1EJ",
+                        price="1200",
+                        phone="07123456789",
+                        category_id="12345",
+                        rent_period="month",
+                    ),
+                    submit=True,
+                    dry_run=False,
+                )
 
 
 if __name__ == "__main__":

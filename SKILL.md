@@ -39,13 +39,16 @@ metadata:
 
 1. 判断是 `business_publish` 还是仍属于 C 端找房
 2. 判断 `mode=sale|rent`
-3. 抽取目标站点、房源类型、位置、价格、联系方式、图片路径、房型面积等字段
-4. 抽取房源特色与强项，并生成标题/描述
-5. 如果缺少必填字段，返回 `missing_fields` 和 `follow_up_questions`，禁止调用发布命令
-6. 第一阶段默认使用 `ok-core-skill publish-property`
-7. 不带 `--submit` 时只填写表单；只有用户明确确认后才允许追加 `--submit`
+3. 复用市场路由：英国 / UK postcode / Gumtree 信号走 `gt-core-skill publish-listing`，非英国默认走 `ok-core-skill publish-property`
+4. 抽取目标站点、房源类型、位置、价格、联系方式、图片路径、房型面积等字段
+5. 抽取房源特色与强项；有位置、地址或 postcode 时必须调用仓库内地图 skill
+6. 由 CLI 基于用户字段和地图 assessments 生成标题/描述，不允许模型自由补广告文案
+7. 如果缺少必填字段，返回 `readiness_status=blocked_required`、`missing_fields` 和 `contextual_follow_up_questions`，禁止调用发布命令
+8. 字段够但信息偏薄时返回 `readiness_status=thin_but_publishable`，允许 dry-run/填表并继续追问推荐补充项
+9. 不带 `--submit`/`--confirm-submit` 时只填写表单或 dry-run；只有用户明确确认后才允许真实提交
 
 B 端发布不得编造价格、面积、地址、联系方式、图片、房间数、卫浴数或未提供的设施。
+B 端发布还不得编造 Dubai Mall、Burj Khalifa、rooftop pool、gym、No pets、security、wardrobes、metro 距离等未由用户提供或地图 assessments 证明的信息。
 
 ## 运行时硬规则
 
@@ -83,6 +86,7 @@ B 端发布不得编造价格、面积、地址、联系方式、图片、房间
 - 出租默认 `--rental-type entire`，租金周期缺失时默认 `--rent-period month`
 - 图片必须是本地绝对路径；OpenClaw 上传附件需要先落地为本地文件
 - 未明确确认真实发布时禁止传 `--submit`
+- 中文 `平/平方米/㎡` 输入需换算为 OK 表单使用的 sqft，同时在报告中保留原始 sqm 和换算说明
 
 ### gt-core-skill
 
@@ -106,13 +110,18 @@ B 端发布不得编造价格、面积、地址、联系方式、图片、房间
 - `gt-core-skill` 的 `logged_in=false` 只记 warning，不算 preflight 失败
 - GT API 版不支持详情补全时，必须把缺口写进 `缺失/未知`
 - 英国请求默认仍然要补详情，不允许只停在搜索列表
+- 英国发布房源必须自动走 `gt-core-skill publish-listing`
+- GT 发布不确认时调用 `publish-listing --dry-run`
+- GT 真实发布必须用户明确确认，并依赖 Gumtree session 中的 `publish_endpoint` 或显式 `--publish-endpoint`；缺失时报告配置错误，不得伪造成功
 
 ### 地图 skill
 
 - 不依赖 nested skill 自动发现
 - 直接调用当前仓库内的 `public-osm-map-context-skill/scripts/cli.py`
 - 搜索类场景默认自动跑地图增强
+- 发布类场景只要有 location / address / postcode，也默认自动跑地图增强
 - 地图失败时继续给出候选表，但状态必须写成 `待补地图` 或 `待人工复核`
+- 发布地图失败时继续生成发布报告，但标题/描述不得加入任何地图结论
 
 ## 何时必须跑地图增强
 

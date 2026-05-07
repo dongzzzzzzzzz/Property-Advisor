@@ -50,6 +50,57 @@ class FakePublisher:
         return {"success": True, "action": "submitted" if submit else "dry_run" if dry_run else "filled"}
 
 
+class FakeMapClient:
+    def __init__(self, *, fail: bool = False, precision: str = "address") -> None:
+        self.fail = fail
+        self.precision = precision
+        self.calls = []
+
+    def doctor(self):
+        if self.fail:
+            return {"status": "error"}
+        return {"status": "ok"}
+
+    def analyze_batch(self, *, listings, destination: str = "", city: str = ""):
+        self.calls.append({"listings": listings, "destination": destination, "city": city})
+        return {
+            "status": "ok",
+            "listings": [
+                {
+                    "id": "publish_draft",
+                    "geo": {"precision": self.precision, "confidence": "medium"},
+                    "verification_links": {"google_maps_manual": "https://maps.example.test/dubai-marina"},
+                    "assessments": {
+                        "transport_access": {
+                            "conclusion": "Transport access has public map evidence for first-pass screening.",
+                            "evidence": ["Nearest mapped transit stop is within a short straight-line range."],
+                            "confidence": "medium",
+                            "limitations": ["straight_line_estimate_only"],
+                        },
+                        "daily_convenience": {
+                            "conclusion": "Daily convenience is supported by mapped amenities.",
+                            "evidence": ["Public map data shows nearby everyday amenities."],
+                            "confidence": "medium",
+                            "limitations": [],
+                        },
+                        "environment_risk": {
+                            "conclusion": "No obvious high-risk environment signal was found in public map screening.",
+                            "evidence": ["No industrial signal was returned by the fixture."],
+                            "confidence": "medium",
+                            "limitations": [],
+                        },
+                        "area_maturity": {
+                            "conclusion": "Area maturity looks usable from public map screening.",
+                            "evidence": ["The fixture includes multiple common POI categories."],
+                            "confidence": "medium",
+                            "limitations": [],
+                        },
+                    },
+                }
+            ],
+        }
+
+
 class PublishIntentTests(unittest.TestCase):
     def test_consumer_search_stays_consumer(self) -> None:
         decision = classify_user_intent("帮我找 London studio")
@@ -79,7 +130,7 @@ class PublishOrchestratorTests(unittest.TestCase):
     def test_missing_required_fields_returns_follow_up_without_calling_publisher(self) -> None:
         publisher = FakePublisher()
         request = infer_publish_request(query_text="帮我出租一套迪拜公寓")
-        orchestrator = PublishPropertyOrchestrator(ok_client=publisher)
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
 
         report = orchestrator.publish(request, dry_run=True)
 
@@ -97,7 +148,7 @@ class PublishOrchestratorTests(unittest.TestCase):
             phone="501234567",
             images=["/tmp/photo.jpg"],
         )
-        orchestrator = PublishPropertyOrchestrator(ok_client=publisher)
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
 
         report = orchestrator.publish(request, dry_run=True)
 
@@ -121,7 +172,7 @@ class PublishOrchestratorTests(unittest.TestCase):
             images=["/tmp/photo.jpg"],
             query_text="出售 Melbourne apartment",
         )
-        orchestrator = PublishPropertyOrchestrator(ok_client=publisher)
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
 
         report = orchestrator.publish(request, confirm_submit=True)
 
@@ -140,7 +191,7 @@ class PublishOrchestratorTests(unittest.TestCase):
             phone="0412345678",
             query_text="出售 Melbourne apartment",
         )
-        orchestrator = PublishPropertyOrchestrator(ok_client=publisher)
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
 
         report = orchestrator.publish(request, confirm_submit=True)
 
@@ -159,7 +210,7 @@ class PublishOrchestratorTests(unittest.TestCase):
             images=["https://example.test/photo.jpg"],
             query_text="我要出租 Dubai Marina apartment",
         )
-        orchestrator = PublishPropertyOrchestrator(ok_client=publisher)
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
 
         report = orchestrator.publish(request, dry_run=True)
 
@@ -187,6 +238,92 @@ class PublishOrchestratorTests(unittest.TestCase):
         self.assertEqual(payload["category_id"], 12345)
         self.assertEqual(payload["location"]["display_name"], "Richmond")
         self.assertEqual(payload["attributes"]["rent_period"], "month")
+
+    def test_sparse_publish_returns_contextual_followups_without_calling_publisher(self) -> None:
+        publisher = FakePublisher()
+        request = infer_publish_request(query_text="我要出租一套公寓")
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=False)
+
+        report = orchestrator.publish(request, dry_run=True)
+
+        self.assertEqual(report.readiness_status, "blocked_required")
+        self.assertIn("location", report.required_missing_fields)
+        self.assertIn("price", report.required_missing_fields)
+        self.assertEqual(publisher.calls, [])
+        self.assertTrue(any("卧室数" in item for item in report.contextual_follow_up_questions))
+
+    def test_publish_copy_uses_map_and_does_not_invent_claims(self) -> None:
+        publisher = FakePublisher()
+        request = infer_publish_request(
+            query_text="我要发布出租房源，Dubai Marina 月租金10000AED左右，1居室1卫，面积53平左右",
+            country="uae",
+            phone="501234567",
+            images=["/tmp/photo.jpg"],
+        )
+        orchestrator = PublishPropertyOrchestrator(ok_client=publisher, map_client=FakeMapClient())
+
+        report = orchestrator.publish(request, dry_run=True)
+
+        self.assertFalse(report.errors)
+        self.assertEqual(report.request.bedrooms, "1")
+        self.assertEqual(report.request.bathrooms, "1")
+        self.assertEqual(report.request.area_size, "570")
+        self.assertEqual(report.request.original_area_size, "53")
+        self.assertIn("about 570 sqft (53 sqm)", report.generated_description)
+        self.assertIn("Transport access has public map evidence", report.generated_description)
+        forbidden = ["Dubai Mall", "Burj Khalifa", "rooftop pool", "No pets", "security", "wardrobes"]
+        self.assertFalse(any(term.lower() in report.generated_description.lower() for term in forbidden))
+        self.assertIn("transport_access", report.map_assessments)
+
+    def test_uk_publish_routes_to_gt_and_blocks_missing_gt_fields(self) -> None:
+        ok_publisher = FakePublisher()
+        gt_publisher = FakePublisher()
+        request = infer_publish_request(
+            query_text="London flat for rent",
+            price="1200",
+            phone="07123456789",
+        )
+        orchestrator = PublishPropertyOrchestrator(
+            ok_client=ok_publisher,
+            gt_client=gt_publisher,
+            map_client=False,
+        )
+
+        report = orchestrator.publish(request, dry_run=True)
+
+        self.assertEqual(report.request.resolved_market, "gt")
+        self.assertIn("category_id", report.required_missing_fields)
+        self.assertIn("postcode", report.required_missing_fields)
+        self.assertEqual(ok_publisher.calls, [])
+        self.assertEqual(gt_publisher.calls, [])
+
+    def test_complete_uk_publish_calls_gt_dry_run(self) -> None:
+        ok_publisher = FakePublisher()
+        gt_publisher = FakePublisher()
+        request = PublishPropertyRequest(
+            mode="rent",
+            country="uk",
+            property_type="apartment",
+            price="1200",
+            location="London",
+            postcode="SW1A 1AA",
+            phone="07123456789",
+            category_id="12345",
+            query_text="London flat for rent",
+        )
+        orchestrator = PublishPropertyOrchestrator(
+            ok_client=ok_publisher,
+            gt_client=gt_publisher,
+            map_client=False,
+        )
+
+        report = orchestrator.publish(request, dry_run=True)
+
+        self.assertFalse(report.errors)
+        self.assertEqual(report.request.resolved_market, "gt")
+        self.assertEqual(ok_publisher.calls, [])
+        self.assertEqual(len(gt_publisher.calls), 1)
+        self.assertTrue(gt_publisher.calls[0]["dry_run"])
 
 
 class PublishCliTests(unittest.TestCase):

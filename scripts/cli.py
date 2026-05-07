@@ -96,6 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--contact-email", default="")
     publish.add_argument("--category-id", default="", help="Required for GT dry-run payloads")
     publish.add_argument("--postcode", default="")
+    publish.add_argument("--address", default="")
+    publish.add_argument("--publish-endpoint", default="")
+    publish.add_argument("--area-unit", choices=["sqm", "sqft", "sq m", "sq ft"], default="")
     publish.add_argument("--lang", default="en")
     publish.add_argument("--confirm-submit", action="store_true", help="Actually submit; otherwise only dry-run/fill form")
     publish.add_argument("--save-draft", action="store_true")
@@ -160,6 +163,9 @@ def main() -> int:
                     contact_email=args.contact_email or None,
                     category_id=args.category_id or None,
                     postcode=args.postcode or None,
+                    address=args.address or None,
+                    publish_endpoint=args.publish_endpoint or None,
+                    area_unit=args.area_unit or None,
                     lang=args.lang,
                 )
             )
